@@ -63,13 +63,23 @@ namespace Live2D.Cubism.Core
 
 
             // Create model.
-            var model = new GameObject(moc.name)
-                .AddComponent<CubismModel>();
-
+            GameObject modelGameObject = new GameObject(moc.name);
+            CubismModel model = modelGameObject.AddComponent<CubismModel>();
 
             // Initialize it by resetting it.
-            model.Reset(moc);
-
+            // Sally: We want to catch any issues here.
+            // This invovles creating the TaskableModel, which involves accessing
+            // the Drawables of the unamanged model. This is where the trouble was
+            // in earlier SDKs, it may be fixed now. We no longer have bad data
+            // (data newer than the SDK) to test with.
+            // Regardless, Live2D does not destroy the game object on error, so 
+            // we will do that here.
+            bool success = model.Reset(moc);
+            if (!success)
+            {
+                Destroy(modelGameObject);
+                return null;
+            }
 
             return model;
         }
@@ -292,15 +302,32 @@ namespace Live2D.Cubism.Core
         /// Initializes instance for first use.
         /// </summary>
         /// <param name="moc">Moc to instantiate from.</param>
-        private void Reset(CubismMoc moc)
+        /// SALLY: We are returning a success bool here so that we can destroy
+        /// the partially completed gameobject if the operation fails.
+        private bool Reset(CubismMoc moc)
         {
             Moc = moc;
             name = moc.name;
-            TaskableModel = new CubismTaskableModel(moc);
+
+            // Sally: We are wrapping this in a try, because accessing the
+            // Drawables in the CubismTaskableModel constructor causes a
+            // null reference exception for improperly formatted model files.
+            // Note: This may be fixed since we integrated SDK 4-r5,
+            // but we no longer have bad model data to doublecheck
+            // (previously we were using SDK 4.4 blendshape data to
+            //  break things).
+            try
+            {
+                TaskableModel = new CubismTaskableModel(moc);
+            }
+            catch
+            {
+                return false;
+            }
 
             if (TaskableModel == null || TaskableModel.UnmanagedModel == null)
             {
-                return;
+                return false;
             }
 
             // Create and initialize proxies.
@@ -319,6 +346,8 @@ namespace Live2D.Cubism.Core
             Drawables = drawables.GetComponentsInChildren<CubismDrawable>();
 
             CanvasInformation = new CubismCanvasInformation(TaskableModel.UnmanagedModel);
+
+            return true;
         }
 
         /// <summary>

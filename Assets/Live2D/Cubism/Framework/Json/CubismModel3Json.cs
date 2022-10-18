@@ -401,27 +401,57 @@ namespace Live2D.Cubism.Framework.Json
 
             var drawables = model.Drawables;
 
-            if (renderers == null || drawables  == null)
+            if (renderers == null || drawables == null)
             {
                 return null;
+            }
+
+            // SALLY: We are loading textures explicitly, against Live2D's original implementation.
+            // This is because they were showing up stark white in the editor and failing silently
+            // in some way.
+            if (_textures == null)
+            {
+                _textures = new Texture2D[FileReferences.Textures.Length];
+
+                for (var i = 0; i < _textures.Length; ++i)
+                {
+#if UNITY_EDITOR
+                    // Sally's implementation
+                    string texturePath = Path.GetDirectoryName(AssetPath) + "/" + FileReferences.Textures[i];
+                    if (!texturePath.StartsWith("file://"))
+                    {
+                        texturePath = $"file://{texturePath}";
+                    }
+                    WWW www = new WWW(texturePath);
+                    _textures[i] = www.texture; // png
+                    Debug.Log($"Setting Texture {i}: {texturePath}");
+#else
+                    // Live2D's implementation
+                    _textures[i] = LoadReferencedAsset<Texture2D>(FileReferences.Textures[i]);
+#endif
+                }
             }
 
             // Initialize materials.
             for (var i = 0; i < renderers.Length; ++i)
             {
+                // SALLY: TODO: Live2D's implementation may cause a small memory leak
                 renderers[i].Material = pickMaterial(this, drawables[i]);
             }
-
 
             // Initialize textures.
             for (var i = 0; i < renderers.Length; ++i)
             {
-                renderers[i].MainTexture = pickTexture(this, drawables[i]);
+                // SALLY: We are referencing _textures directly here instead of using
+                // Live2D's implementation (commented out, here):
+                // renderers[i].MainTexture = pickTexture(this, drawables[i]);
+                renderers[i].MainTexture = _textures[drawables[i].TextureIndex];
             }
 
 
+
             // Initialize drawables.
-            if(HitAreas != null)
+            if (HitAreas != null)
             {
                 for (var i = 0; i < HitAreas.Length; i++)
                 {
@@ -433,7 +463,13 @@ namespace Live2D.Cubism.Framework.Json
                             var hitDrawable = drawables[j].gameObject.AddComponent<CubismHitDrawable>();
                             hitDrawable.Name = HitAreas[i].Name;
 
-                            drawables[j].gameObject.AddComponent<CubismRaycastable>();
+                            // SALLY
+                            // We are going to make this precise, so that our users do not get
+                            // upset that they touch 'nothing' and the character still moves.
+                            //drawables[j].gameObject.AddComponent<CubismRaycastable>();
+                            //break;
+                            var raycastable = drawables[j].gameObject.AddComponent<CubismRaycastable>();
+                            raycastable.Precision = CubismRaycastablePrecision.Triangles;
                             break;
                         }
                     }
@@ -646,7 +682,8 @@ namespace Live2D.Cubism.Framework.Json
         /// <param name="assetType">Asset type.</param>
         /// <param name="assetPath">Path to asset.</param>
         /// <returns>The asset on success; <see langword="null"/> otherwise.</returns>
-        private static object BuiltinLoadAssetAtPath(Type assetType, string assetPath)
+        /// SALLY: Leaving this here for reference. We created our own.
+        private static object BuiltinLoadAssetAtPath_CUBISM(Type assetType, string assetPath)
         {
             // Explicitly deal with byte arrays.
             if (assetType == typeof(byte[]))
@@ -676,7 +713,6 @@ namespace Live2D.Cubism.Framework.Json
 #endif
             }
 
-
 #if UNITY_EDITOR
             return AssetDatabase.LoadAssetAtPath(assetPath, assetType);
 #else
@@ -684,6 +720,30 @@ namespace Live2D.Cubism.Framework.Json
 #endif
         }
 
+        // SALLY
+        private static object BuiltinLoadAssetAtPath(Type assetType, string assetPath)
+        {
+            if (!assetPath.StartsWith("file://"))
+            {
+                assetPath = $"file://{assetPath}";
+            }
+
+            //Debug.Log($"Loading an {assetType.ToString()} asset from Path: {assetPath}");
+
+            WWW www = new WWW(assetPath);
+            if (assetType == typeof(byte[]))
+            {
+                return www.bytes; // moc3
+            }
+            else if (assetType == typeof(Texture2D))
+            {
+                return www.texture; // png
+            }
+            else
+            {
+                return www.text; // json
+            }
+        }
 
         /// <summary>
         /// Checks whether the parameter is an eye blink parameter.
